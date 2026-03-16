@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import TaskInput from "./components/TaskInput.jsx";
-import StepList from "./components/StepList.jsx";
-import Timeline from "./components/Timeline.jsx";
+import StepTimeline from "./components/StepTimeline.jsx";
 import FocusTimer from "./components/FocusTimer.jsx";
 import CompletionRecord from "./components/CompletionRecord.jsx";
 import MoodTracker from "./components/MoodTracker.jsx";
@@ -14,7 +13,6 @@ function App() {
   const [completed, setCompleted] = useState(new Set());
   const [timerStep, setTimerStep] = useState(null);
   const [taskName, setTaskName] = useState("");
-  const [viewMode, setViewMode] = useState("list");
   const [mobileTab, setMobileTab] = useState("home");
   const [records, setRecords] = useState(() => {
     try { return JSON.parse(localStorage.getItem("tasksplit_records") || "[]"); }
@@ -60,30 +58,6 @@ function App() {
 
   const hasSteps = steps.length > 0 && !loading;
   const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
-
-  // Shared step view
-  const stepView = (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-extrabold" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
-        <div className="inline-flex rounded-xl p-0.5" style={{ backgroundColor: "var(--border)" }}>
-          {[
-            { id: "list", label: "列表", grad: "var(--coral), var(--peach)" },
-            { id: "timeline", label: "时间线", grad: "var(--sky), var(--lavender)" },
-          ].map(v => (
-            <button key={v.id} onClick={() => setViewMode(v.id)}
-              className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${viewMode === v.id ? "text-white shadow" : ""}`}
-              style={viewMode === v.id ? { background: `linear-gradient(135deg, ${v.grad})` } : { color: "var(--warm-gray)" }}>
-              {v.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {viewMode === "list"
-        ? <StepList steps={steps} onToggle={handleToggle} onStartTimer={setTimerStep} completedCount={completed.size} />
-        : <Timeline steps={steps} completed={completed} onReorder={handleReorder} onStartTimer={setTimerStep} onToggle={handleToggle} />}
-    </div>
-  );
 
   const loadingView = (
     <div className="flex flex-col items-center justify-center py-20 space-y-4 animate-fadeIn">
@@ -157,14 +131,13 @@ function App() {
             <p className="text-xs font-bold mb-2" style={{ color: "var(--soft-dark)" }}>💡 使用技巧</p>
             <ul className="space-y-1.5">
               {[
-                "选择场景（如「毕业论文」）可获得更精准的拆解",
-                "每个步骤 5-20 分钟，一个番茄钟搞定",
-                "第一步故意设计得很简单，帮你启动",
-                "每天完成 1 个步骤就是胜利 🎉",
+                "选择场景可获得更精准的拆解",
+                "每步 5-20 分钟，一个番茄钟搞定",
+                "第一步故意设计得很简单",
+                "拖拽卡片可调整顺序",
               ].map((tip, i) => (
                 <li key={i} className="text-[11px] leading-relaxed flex gap-1.5" style={{ color: "var(--warm-gray)" }}>
-                  <span style={{ color: ["var(--coral)","var(--sunshine)","var(--mint)","var(--sky)"][i] }}>●</span>
-                  {tip}
+                  <span style={{ color: ["var(--coral)","var(--sunshine)","var(--mint)","var(--sky)"][i] }}>●</span>{tip}
                 </li>
               ))}
             </ul>
@@ -176,16 +149,20 @@ function App() {
           <div className="max-w-2xl mx-auto">
             {loading && loadingView}
             {errorView}
-            {hasSteps && stepView}
+            {hasSteps && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-extrabold" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
+                <StepTimeline steps={steps} completed={completed}
+                  onToggle={handleToggle} onStartTimer={setTimerStep} onReorder={handleReorder} />
+              </div>
+            )}
             {!hasSteps && !loading && !error && (
               <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-5 opacity-50">
                 <div className="text-7xl animate-float">✂️</div>
-                <div>
-                  <p className="text-xl font-extrabold" style={{ color: "var(--soft-dark)" }}>在左侧输入任务</p>
-                  <p className="text-sm mt-2" style={{ color: "var(--warm-gray)" }}>
-                    试试"写毕业论文"、"整理房间"、"准备面试"、"睡觉前的流程"
-                  </p>
-                </div>
+                <p className="text-xl font-extrabold" style={{ color: "var(--soft-dark)" }}>在左侧输入任务</p>
+                <p className="text-sm" style={{ color: "var(--warm-gray)" }}>
+                  试试 "写毕业论文"、"整理房间"、"准备面试"
+                </p>
               </div>
             )}
           </div>
@@ -194,7 +171,6 @@ function App() {
 
       {/* ===== MOBILE ===== */}
       <div className="lg:hidden flex flex-col min-h-screen relative z-10">
-        {/* Top bar */}
         <div className="flex items-center justify-between px-4 pt-4 pb-1">
           <div className="flex items-center gap-2">
             <span className="text-xl">✂️</span>
@@ -210,7 +186,6 @@ function App() {
 
         {showSettings && <div className="mx-4 mt-2">{settingsPanel}</div>}
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto px-4 pb-24 pt-2">
           {mobileTab === "home" && (
             <div className="space-y-4">
@@ -219,7 +194,13 @@ function App() {
               </div>
               {loading && loadingView}
               {errorView}
-              {hasSteps && stepView}
+              {hasSteps && (
+                <div className="space-y-3">
+                  <h2 className="text-base font-extrabold px-1" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
+                  <StepTimeline steps={steps} completed={completed}
+                    onToggle={handleToggle} onStartTimer={setTimerStep} onReorder={handleReorder} />
+                </div>
+              )}
               {!hasSteps && !loading && !error && (
                 <div className="text-center py-8 space-y-3 opacity-40">
                   <div className="text-4xl animate-float">✂️</div>
@@ -232,14 +213,13 @@ function App() {
           {mobileTab === "history" && <CompletionRecord records={records} />}
         </div>
 
-        {/* Bottom nav */}
         <div className="fixed bottom-0 left-0 right-0 flex border-t pb-safe z-30"
           style={{ backgroundColor: "var(--cream)", borderColor: "var(--border)", boxShadow: "0 -2px 12px rgba(0,0,0,0.04)" }}>
           {[
             { id: "home", icon: "✂️", label: "拆解" },
             { id: "mood", icon: "🧠", label: "状态" },
             { id: "history", icon: "📊", label: "记录" },
-          ].map((tab) => (
+          ].map(tab => (
             <button key={tab.id} onClick={() => setMobileTab(tab.id)}
               className={`flex-1 flex flex-col items-center py-3 gap-0.5 transition-all
                 ${mobileTab === tab.id ? "" : "opacity-40"}`}>
