@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import TaskInput from "./components/TaskInput.jsx";
 import StepTimeline from "./components/StepTimeline.jsx";
 import FocusTimer from "./components/FocusTimer.jsx";
 import CompletionRecord from "./components/CompletionRecord.jsx";
 import MoodTracker from "./components/MoodTracker.jsx";
+import Journal from "./components/Journal.jsx";
+import ADHDTools from "./components/ADHDTools.jsx";
 import { splitTask, splitTaskMock } from "./services/ai.js";
 
 function App() {
@@ -21,20 +23,31 @@ function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("deepseek_api_key") || "");
   const [showSettings, setShowSettings] = useState(false);
 
+  // FIX: prevent duplicate record saves
+  const savedRef = useRef(false);
+
   useEffect(() => {
-    if (steps.length > 0 && completed.size === steps.length) {
+    if (steps.length > 0 && completed.size === steps.length && !savedRef.current) {
+      savedRef.current = true;
       const totalMinutes = steps.reduce((sum, s) => sum + s.estimated_minutes, 0);
       const rec = { task: taskName, steps: steps.length, minutes: totalMinutes,
         date: new Date().toLocaleDateString("zh-CN") };
       const nr = [rec, ...records].slice(0, 20);
       setRecords(nr);
       localStorage.setItem("tasksplit_records", JSON.stringify(nr));
+      // Add reward points
+      const pts = parseInt(localStorage.getItem("tasksplit_points") || "0") + steps.length;
+      localStorage.setItem("tasksplit_points", String(pts));
     }
-  }, [completed.size]);
+    // Reset saved flag if not all complete
+    if (steps.length > 0 && completed.size < steps.length) {
+      savedRef.current = false;
+    }
+  }, [completed.size, steps.length]);
 
   async function handleSubmit({ task, scene, answers }) {
     setLoading(true); setError(null); setSteps([]); setCompleted(new Set());
-    setTaskName(task); setMobileTab("home");
+    setTaskName(task); setMobileTab("home"); savedRef.current = false;
     try {
       const result = apiKey.trim()
         ? await splitTask(task, scene, answers, apiKey.trim())
@@ -46,6 +59,11 @@ function App() {
 
   function handleToggle(order, isChecked) {
     setCompleted(prev => { const n = new Set(prev); isChecked ? n.add(order) : n.delete(order); return n; });
+    // Add 1 point per step completed
+    if (isChecked) {
+      const pts = parseInt(localStorage.getItem("tasksplit_points") || "0") + 1;
+      localStorage.setItem("tasksplit_points", String(pts));
+    }
   }
   function handleReorder(from, to) {
     const s = [...steps]; const [m] = s.splice(from, 1); s.splice(to, 0, m);
@@ -96,7 +114,6 @@ function App() {
 
   return (
     <div className="min-h-screen relative" style={{ backgroundColor: "var(--cream)" }}>
-      {/* Blobs */}
       <div className="fixed top-[-120px] right-[-80px] w-[350px] h-[350px] rounded-full opacity-12 pointer-events-none"
         style={{ background: "var(--peach)", filter: "blur(80px)" }} />
       <div className="fixed bottom-[-100px] left-[-60px] w-[300px] h-[300px] rounded-full opacity-12 pointer-events-none"
@@ -104,7 +121,6 @@ function App() {
 
       {/* ===== DESKTOP ===== */}
       <div className="hidden lg:flex h-screen relative z-10">
-        {/* Left Sidebar */}
         <div className="w-[360px] flex-shrink-0 border-r flex flex-col h-full overflow-y-auto p-5 space-y-4"
           style={{ borderColor: "var(--border)" }}>
           <div className="flex items-center gap-2.5">
@@ -125,26 +141,11 @@ function App() {
           </div>
 
           <MoodTracker compact />
+          <Journal compact />
+          <ADHDTools compact />
           <CompletionRecord records={records} />
-
-          <div className="card p-4">
-            <p className="text-xs font-bold mb-2" style={{ color: "var(--soft-dark)" }}>💡 使用技巧</p>
-            <ul className="space-y-1.5">
-              {[
-                "选择场景可获得更精准的拆解",
-                "每步 5-20 分钟，一个番茄钟搞定",
-                "第一步故意设计得很简单",
-                "拖拽卡片可调整顺序",
-              ].map((tip, i) => (
-                <li key={i} className="text-[11px] leading-relaxed flex gap-1.5" style={{ color: "var(--warm-gray)" }}>
-                  <span style={{ color: ["var(--coral)","var(--sunshine)","var(--mint)","var(--sky)"][i] }}>●</span>{tip}
-                </li>
-              ))}
-            </ul>
-          </div>
         </div>
 
-        {/* Right main */}
         <div className="flex-1 overflow-y-auto p-6">
           <div className="max-w-2xl mx-auto">
             {loading && loadingView}
@@ -189,9 +190,7 @@ function App() {
         <div className="flex-1 overflow-y-auto px-4 pb-24 pt-2">
           {mobileTab === "home" && (
             <div className="space-y-4">
-              <div className="card p-4">
-                <TaskInput onSubmit={handleSubmit} loading={loading} />
-              </div>
+              <div className="card p-4"><TaskInput onSubmit={handleSubmit} loading={loading} /></div>
               {loading && loadingView}
               {errorView}
               {hasSteps && (
@@ -210,6 +209,8 @@ function App() {
             </div>
           )}
           {mobileTab === "mood" && <MoodTracker />}
+          {mobileTab === "journal" && <Journal />}
+          {mobileTab === "tools" && <ADHDTools />}
           {mobileTab === "history" && <CompletionRecord records={records} />}
         </div>
 
@@ -218,13 +219,15 @@ function App() {
           {[
             { id: "home", icon: "✂️", label: "拆解" },
             { id: "mood", icon: "🧠", label: "状态" },
+            { id: "journal", icon: "📝", label: "日记" },
+            { id: "tools", icon: "⚡", label: "工具" },
             { id: "history", icon: "📊", label: "记录" },
           ].map(tab => (
             <button key={tab.id} onClick={() => setMobileTab(tab.id)}
-              className={`flex-1 flex flex-col items-center py-3 gap-0.5 transition-all
+              className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 transition-all
                 ${mobileTab === tab.id ? "" : "opacity-40"}`}>
-              <span className="text-lg">{tab.icon}</span>
-              <span className="text-[10px] font-bold"
+              <span className="text-base">{tab.icon}</span>
+              <span className="text-[9px] font-bold"
                 style={{ color: mobileTab === tab.id ? "var(--coral)" : "var(--warm-gray)" }}>{tab.label}</span>
             </button>
           ))}
