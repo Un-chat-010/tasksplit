@@ -15,7 +15,7 @@ function App() {
   const [timerStep, setTimerStep] = useState(null);
   const [taskName, setTaskName] = useState("");
   const [viewMode, setViewMode] = useState("list");
-  const [mobileTab, setMobileTab] = useState("home"); // home | mood | history
+  const [mobileTab, setMobileTab] = useState("home");
   const [records, setRecords] = useState(() => {
     try { return JSON.parse(localStorage.getItem("tasksplit_records") || "[]"); }
     catch { return []; }
@@ -26,17 +26,17 @@ function App() {
   useEffect(() => {
     if (steps.length > 0 && completed.size === steps.length) {
       const totalMinutes = steps.reduce((sum, s) => sum + s.estimated_minutes, 0);
-      const record = { task: taskName, steps: steps.length, minutes: totalMinutes,
+      const rec = { task: taskName, steps: steps.length, minutes: totalMinutes,
         date: new Date().toLocaleDateString("zh-CN") };
-      const newRecords = [record, ...records].slice(0, 20);
-      setRecords(newRecords);
-      localStorage.setItem("tasksplit_records", JSON.stringify(newRecords));
+      const nr = [rec, ...records].slice(0, 20);
+      setRecords(nr);
+      localStorage.setItem("tasksplit_records", JSON.stringify(nr));
     }
   }, [completed.size]);
 
   async function handleSubmit({ task, scene, answers }) {
-    setLoading(true); setError(null); setSteps([]); setCompleted(new Set()); setTaskName(task);
-    setMobileTab("home");
+    setLoading(true); setError(null); setSteps([]); setCompleted(new Set());
+    setTaskName(task); setMobileTab("home");
     try {
       const result = apiKey.trim()
         ? await splitTask(task, scene, answers, apiKey.trim())
@@ -47,40 +47,93 @@ function App() {
   }
 
   function handleToggle(order, isChecked) {
-    setCompleted(prev => {
-      const next = new Set(prev);
-      isChecked ? next.add(order) : next.delete(order);
-      return next;
-    });
+    setCompleted(prev => { const n = new Set(prev); isChecked ? n.add(order) : n.delete(order); return n; });
   }
-
   function handleReorder(from, to) {
-    const s = [...steps]; const [moved] = s.splice(from, 1); s.splice(to, 0, moved);
+    const s = [...steps]; const [m] = s.splice(from, 1); s.splice(to, 0, m);
     s.forEach((st, i) => st.order = i + 1); setSteps(s);
   }
-
   function handleTimerComplete() {
     if (timerStep) setCompleted(prev => new Set(prev).add(timerStep.order));
     setTimerStep(null);
   }
 
   const hasSteps = steps.length > 0 && !loading;
+  const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
+
+  // Shared step view
+  const stepView = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-extrabold" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
+        <div className="inline-flex rounded-xl p-0.5" style={{ backgroundColor: "var(--border)" }}>
+          {[
+            { id: "list", label: "列表", grad: "var(--coral), var(--peach)" },
+            { id: "timeline", label: "时间线", grad: "var(--sky), var(--lavender)" },
+          ].map(v => (
+            <button key={v.id} onClick={() => setViewMode(v.id)}
+              className={`px-3.5 py-1.5 rounded-lg text-[11px] font-bold transition-all ${viewMode === v.id ? "text-white shadow" : ""}`}
+              style={viewMode === v.id ? { background: `linear-gradient(135deg, ${v.grad})` } : { color: "var(--warm-gray)" }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {viewMode === "list"
+        ? <StepList steps={steps} onToggle={handleToggle} onStartTimer={setTimerStep} completedCount={completed.size} />
+        : <Timeline steps={steps} completed={completed} onReorder={handleReorder} onStartTimer={setTimerStep} onToggle={handleToggle} />}
+    </div>
+  );
+
+  const loadingView = (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4 animate-fadeIn">
+      <div className="text-5xl animate-float">🧠</div>
+      <p className="text-lg font-bold" style={{ color: "var(--soft-dark)" }}>正在拆解「{taskName}」...</p>
+      <div className="flex gap-2">
+        {[0,1,2].map(i => (
+          <div key={i} className="w-3 h-3 rounded-full animate-pulse"
+            style={{ backgroundColor: ["var(--coral)","var(--sunshine)","var(--mint)"][i], animationDelay: `${i*200}ms` }} />
+        ))}
+      </div>
+    </div>
+  );
+
+  const errorView = error && (
+    <div className="p-5 rounded-3xl animate-popIn" style={{ backgroundColor: "#FFF0F0", border: "2px solid #FFD0D0" }}>
+      <p className="font-bold" style={{ color: "var(--coral)" }}>❌ {error}</p>
+      <p className="text-sm mt-1" style={{ color: "var(--warm-gray)" }}>请检查 API Key 或稍后重试</p>
+    </div>
+  );
+
+  const settingsPanel = showSettings && (
+    <div className="card p-4 space-y-3 animate-slideDown">
+      <p className="text-xs font-bold">🔑 DeepSeek API Key</p>
+      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+        placeholder="sk-..." className="w-full px-3 py-2 rounded-xl text-xs font-medium focus:outline-none border"
+        style={{ borderColor: "var(--border)" }} />
+      <div className="flex justify-between items-center">
+        <span className="text-[10px]" style={{ color: "var(--warm-gray)" }}>{apiKey ? "✅ 已配置" : "未配置=演示"}</span>
+        <button onClick={() => { localStorage.setItem("deepseek_api_key", apiKey); setShowSettings(false); }}
+          className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white"
+          style={{ background: "linear-gradient(135deg, var(--coral), var(--peach))" }}>保存</button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen relative" style={{ backgroundColor: "var(--cream)" }}>
-      {/* Background blobs */}
-      <div className="fixed top-[-120px] right-[-80px] w-[350px] h-[350px] rounded-full opacity-15 pointer-events-none"
+      {/* Blobs */}
+      <div className="fixed top-[-120px] right-[-80px] w-[350px] h-[350px] rounded-full opacity-12 pointer-events-none"
         style={{ background: "var(--peach)", filter: "blur(80px)" }} />
-      <div className="fixed bottom-[-100px] left-[-60px] w-[300px] h-[300px] rounded-full opacity-15 pointer-events-none"
+      <div className="fixed bottom-[-100px] left-[-60px] w-[300px] h-[300px] rounded-full opacity-12 pointer-events-none"
         style={{ background: "var(--lavender)", filter: "blur(80px)" }} />
 
-      {/* ===== DESKTOP LAYOUT (lg+) ===== */}
+      {/* ===== DESKTOP ===== */}
       <div className="hidden lg:flex h-screen relative z-10">
         {/* Left Sidebar */}
-        <div className="w-[380px] flex-shrink-0 border-r flex flex-col h-full overflow-y-auto p-5 space-y-4"
+        <div className="w-[360px] flex-shrink-0 border-r flex flex-col h-full overflow-y-auto p-5 space-y-4"
           style={{ borderColor: "var(--border)" }}>
-          {/* Logo */}
-          <div className="flex items-center gap-2.5 pb-2">
+          <div className="flex items-center gap-2.5">
             <span className="text-2xl">✂️</span>
             <h1 className="text-xl font-extrabold" style={{ color: "var(--coral)" }}>TaskSplit</h1>
             <div className="flex-1" />
@@ -88,254 +141,117 @@ function App() {
               className="w-8 h-8 rounded-xl flex items-center justify-center text-sm hover:scale-110 transition-all"
               style={{ backgroundColor: "white", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>⚙️</button>
           </div>
+          <p className="text-xs font-medium -mt-2" style={{ color: "var(--warm-gray)" }}>{today}</p>
 
-          {/* Settings panel */}
-          {showSettings && (
-            <div className="card p-4 space-y-3 animate-slideDown">
-              <p className="text-xs font-bold" style={{ color: "var(--soft-dark)" }}>🔑 DeepSeek API Key</p>
-              <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="w-full px-3 py-2 rounded-xl text-xs font-medium focus:outline-none border"
-                style={{ borderColor: "var(--border)" }} />
-              <div className="flex justify-between items-center">
-                <span className="text-[10px]" style={{ color: "var(--warm-gray)" }}>
-                  {apiKey ? "✅ 已配置" : "未配置=演示"}
-                </span>
-                <button onClick={() => { localStorage.setItem("deepseek_api_key", apiKey); setShowSettings(false); }}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white"
-                  style={{ background: "linear-gradient(135deg, var(--coral), var(--peach))" }}>保存</button>
-              </div>
-            </div>
-          )}
+          {settingsPanel}
 
-          {/* Task Input */}
           <div className="card p-4">
             <p className="text-xs font-bold mb-3" style={{ color: "var(--warm-gray)" }}>📝 新任务</p>
             <TaskInput onSubmit={handleSubmit} loading={loading} />
           </div>
 
-          {/* Mood */}
-          <MoodTracker />
-
-          {/* Records */}
+          <MoodTracker compact />
           <CompletionRecord records={records} />
 
-          {/* Tips */}
           <div className="card p-4">
-            <p className="text-xs font-bold mb-2" style={{ color: "var(--soft-dark)" }}>💡 小贴士</p>
-            <p className="text-[11px] leading-relaxed" style={{ color: "var(--warm-gray)" }}>
-              每个步骤都设计得足够小，5-20分钟就能完成。不需要一口气做完，每天完成1个步骤就是胜利。
-            </p>
+            <p className="text-xs font-bold mb-2" style={{ color: "var(--soft-dark)" }}>💡 使用技巧</p>
+            <ul className="space-y-1.5">
+              {[
+                "选择场景（如「毕业论文」）可获得更精准的拆解",
+                "每个步骤 5-20 分钟，一个番茄钟搞定",
+                "第一步故意设计得很简单，帮你启动",
+                "每天完成 1 个步骤就是胜利 🎉",
+              ].map((tip, i) => (
+                <li key={i} className="text-[11px] leading-relaxed flex gap-1.5" style={{ color: "var(--warm-gray)" }}>
+                  <span style={{ color: ["var(--coral)","var(--sunshine)","var(--mint)","var(--sky)"][i] }}>●</span>
+                  {tip}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
-        {/* Right Main Area */}
+        {/* Right main */}
         <div className="flex-1 overflow-y-auto p-6">
-          {/* Empty state */}
-          {!hasSteps && !loading && !error && (
-            <div className="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-60">
-              <div className="text-6xl animate-float">✂️</div>
-              <p className="text-lg font-bold" style={{ color: "var(--soft-dark)" }}>在左侧输入任务开始拆解</p>
-              <p className="text-sm" style={{ color: "var(--warm-gray)" }}>
-                输入像"写毕业论文"、"整理房间"、"准备面试"这样的任务
-              </p>
-            </div>
-          )}
-
-          {/* Loading */}
-          {loading && (
-            <div className="flex flex-col items-center justify-center h-full space-y-4 animate-fadeIn">
-              <div className="text-5xl animate-float">🧠</div>
-              <p className="text-lg font-bold" style={{ color: "var(--soft-dark)" }}>正在拆解「{taskName}」...</p>
-              <div className="flex gap-2">
-                {[0,1,2].map(i => (
-                  <div key={i} className="w-3 h-3 rounded-full animate-pulse"
-                    style={{ backgroundColor: ["var(--coral)","var(--sunshine)","var(--mint)"][i], animationDelay: `${i*200}ms` }} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="max-w-lg mx-auto mt-20 p-5 rounded-3xl animate-popIn"
-              style={{ backgroundColor: "#FFF0F0", border: "2px solid #FFD0D0" }}>
-              <p className="font-bold" style={{ color: "var(--coral)" }}>❌ {error}</p>
-              <p className="text-sm mt-1" style={{ color: "var(--warm-gray)" }}>请检查 API Key 或稍后重试</p>
-            </div>
-          )}
-
-          {/* Steps with view toggle */}
-          {hasSteps && (
-            <div className="max-w-2xl mx-auto space-y-5">
-              {/* Header + toggle */}
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-extrabold" style={{ color: "var(--soft-dark)" }}>
-                  📋 {taskName}
-                </h2>
-                <div className="inline-flex rounded-xl p-0.5" style={{ backgroundColor: "var(--border)" }}>
-                  <button onClick={() => setViewMode("list")}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      viewMode === "list" ? "text-white shadow" : ""}`}
-                    style={viewMode === "list" ? { background: "linear-gradient(135deg, var(--coral), var(--peach))" } : { color: "var(--warm-gray)" }}>
-                    列表
-                  </button>
-                  <button onClick={() => setViewMode("timeline")}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      viewMode === "timeline" ? "text-white shadow" : ""}`}
-                    style={viewMode === "timeline" ? { background: "linear-gradient(135deg, var(--sky), var(--lavender))" } : { color: "var(--warm-gray)" }}>
-                    时间线
-                  </button>
+          <div className="max-w-2xl mx-auto">
+            {loading && loadingView}
+            {errorView}
+            {hasSteps && stepView}
+            {!hasSteps && !loading && !error && (
+              <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-5 opacity-50">
+                <div className="text-7xl animate-float">✂️</div>
+                <div>
+                  <p className="text-xl font-extrabold" style={{ color: "var(--soft-dark)" }}>在左侧输入任务</p>
+                  <p className="text-sm mt-2" style={{ color: "var(--warm-gray)" }}>
+                    试试"写毕业论文"、"整理房间"、"准备面试"、"睡觉前的流程"
+                  </p>
                 </div>
               </div>
-
-              {viewMode === "list" ? (
-                <StepList steps={steps} onToggle={handleToggle} onStartTimer={setTimerStep} completedCount={completed.size} />
-              ) : (
-                <Timeline steps={steps} completed={completed} onReorder={handleReorder} onStartTimer={setTimerStep} onToggle={handleToggle} />
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ===== MOBILE LAYOUT (< lg) ===== */}
+      {/* ===== MOBILE ===== */}
       <div className="lg:hidden flex flex-col min-h-screen relative z-10">
         {/* Top bar */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <div className="flex items-center justify-between px-4 pt-4 pb-1">
           <div className="flex items-center gap-2">
             <span className="text-xl">✂️</span>
-            <h1 className="text-lg font-extrabold" style={{ color: "var(--coral)" }}>TaskSplit</h1>
+            <div>
+              <h1 className="text-lg font-extrabold leading-tight" style={{ color: "var(--coral)" }}>TaskSplit</h1>
+              <p className="text-[10px] font-medium -mt-0.5" style={{ color: "var(--warm-gray)" }}>{today}</p>
+            </div>
           </div>
           <button onClick={() => setShowSettings(!showSettings)}
             className="w-8 h-8 rounded-xl flex items-center justify-center text-sm"
             style={{ backgroundColor: "white", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>⚙️</button>
         </div>
 
-        {showSettings && (
-          <div className="mx-4 mb-3 card p-4 space-y-3 animate-slideDown">
-            <p className="text-xs font-bold">🔑 DeepSeek API Key</p>
-            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..." className="w-full px-3 py-2 rounded-xl text-xs border"
-              style={{ borderColor: "var(--border)" }} />
-            <div className="flex justify-between">
-              <span className="text-[10px]" style={{ color: "var(--warm-gray)" }}>{apiKey ? "✅ 已配置" : "未配置=演示"}</span>
-              <button onClick={() => { localStorage.setItem("deepseek_api_key", apiKey); setShowSettings(false); }}
-                className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white"
-                style={{ background: "linear-gradient(135deg, var(--coral), var(--peach))" }}>保存</button>
-            </div>
-          </div>
-        )}
+        {showSettings && <div className="mx-4 mt-2">{settingsPanel}</div>}
 
-        {/* Mobile content area */}
-        <div className="flex-1 overflow-y-auto px-4 pb-24">
-          {/* Home tab */}
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-4 pb-24 pt-2">
           {mobileTab === "home" && (
-            <div className="space-y-4 py-2">
-              {/* Input always visible */}
+            <div className="space-y-4">
               <div className="card p-4">
                 <TaskInput onSubmit={handleSubmit} loading={loading} />
               </div>
-
-              {/* Loading */}
-              {loading && (
-                <div className="text-center py-10 space-y-3 animate-fadeIn">
-                  <div className="text-4xl animate-float">🧠</div>
-                  <p className="text-base font-bold" style={{ color: "var(--soft-dark)" }}>正在拆解「{taskName}」...</p>
-                  <div className="flex justify-center gap-2">
-                    {[0,1,2].map(i => (
-                      <div key={i} className="w-2.5 h-2.5 rounded-full animate-pulse"
-                        style={{ backgroundColor: ["var(--coral)","var(--sunshine)","var(--mint)"][i], animationDelay: `${i*200}ms` }} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {error && (
-                <div className="p-4 rounded-2xl animate-popIn"
-                  style={{ backgroundColor: "#FFF0F0", border: "2px solid #FFD0D0" }}>
-                  <p className="text-sm font-bold" style={{ color: "var(--coral)" }}>❌ {error}</p>
-                </div>
-              )}
-
-              {/* Steps */}
-              {hasSteps && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-base font-extrabold" style={{ color: "var(--soft-dark)" }}>
-                      {taskName}
-                    </h2>
-                    <div className="inline-flex rounded-lg p-0.5" style={{ backgroundColor: "var(--border)" }}>
-                      <button onClick={() => setViewMode("list")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold ${viewMode === "list" ? "text-white shadow" : ""}`}
-                        style={viewMode === "list" ? { background: "linear-gradient(135deg, var(--coral), var(--peach))" } : { color: "var(--warm-gray)" }}>
-                        列表
-                      </button>
-                      <button onClick={() => setViewMode("timeline")}
-                        className={`px-3 py-1 rounded-md text-[11px] font-bold ${viewMode === "timeline" ? "text-white shadow" : ""}`}
-                        style={viewMode === "timeline" ? { background: "linear-gradient(135deg, var(--sky), var(--lavender))" } : { color: "var(--warm-gray)" }}>
-                        时间线
-                      </button>
-                    </div>
-                  </div>
-                  {viewMode === "list" ? (
-                    <StepList steps={steps} onToggle={handleToggle} onStartTimer={setTimerStep} completedCount={completed.size} />
-                  ) : (
-                    <Timeline steps={steps} completed={completed} onReorder={handleReorder} onStartTimer={setTimerStep} onToggle={handleToggle} />
-                  )}
-                </div>
-              )}
-
-              {/* Empty state */}
+              {loading && loadingView}
+              {errorView}
+              {hasSteps && stepView}
               {!hasSteps && !loading && !error && (
-                <div className="text-center py-10 space-y-3 opacity-50">
+                <div className="text-center py-8 space-y-3 opacity-40">
                   <div className="text-4xl animate-float">✂️</div>
-                  <p className="text-sm font-bold">输入任务，AI 帮你拆解成小步骤</p>
+                  <p className="text-sm font-bold">选择场景或输入任务，AI 帮你拆</p>
                 </div>
               )}
             </div>
           )}
-
-          {/* Mood tab */}
-          {mobileTab === "mood" && (
-            <div className="py-4">
-              <MoodTracker />
-            </div>
-          )}
-
-          {/* History tab */}
-          {mobileTab === "history" && (
-            <div className="py-4">
-              <CompletionRecord records={records} />
-            </div>
-          )}
+          {mobileTab === "mood" && <MoodTracker />}
+          {mobileTab === "history" && <CompletionRecord records={records} />}
         </div>
 
-        {/* Mobile bottom nav */}
+        {/* Bottom nav */}
         <div className="fixed bottom-0 left-0 right-0 flex border-t pb-safe z-30"
           style={{ backgroundColor: "var(--cream)", borderColor: "var(--border)", boxShadow: "0 -2px 12px rgba(0,0,0,0.04)" }}>
           {[
             { id: "home", icon: "✂️", label: "拆解" },
-            { id: "mood", icon: "💭", label: "状态" },
+            { id: "mood", icon: "🧠", label: "状态" },
             { id: "history", icon: "📊", label: "记录" },
           ].map((tab) => (
             <button key={tab.id} onClick={() => setMobileTab(tab.id)}
               className={`flex-1 flex flex-col items-center py-3 gap-0.5 transition-all
-                ${mobileTab === tab.id ? "scale-105" : "opacity-50"}`}>
+                ${mobileTab === tab.id ? "" : "opacity-40"}`}>
               <span className="text-lg">{tab.icon}</span>
               <span className="text-[10px] font-bold"
-                style={{ color: mobileTab === tab.id ? "var(--coral)" : "var(--warm-gray)" }}>
-                {tab.label}
-              </span>
+                style={{ color: mobileTab === tab.id ? "var(--coral)" : "var(--warm-gray)" }}>{tab.label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Timer overlay */}
-      {timerStep && (
-        <FocusTimer step={timerStep} onComplete={handleTimerComplete} onClose={() => setTimerStep(null)} />
-      )}
+      {timerStep && <FocusTimer step={timerStep} onComplete={handleTimerComplete} onClose={() => setTimerStep(null)} />}
     </div>
   );
 }
