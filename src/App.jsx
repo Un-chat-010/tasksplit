@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TaskInput from "./components/TaskInput.jsx";
 import StepList from "./components/StepList.jsx";
 import FocusTimer from "./components/FocusTimer.jsx";
+import CompletionRecord from "./components/CompletionRecord.jsx";
 import { splitTask, splitTaskMock } from "./services/ai.js";
 
 function App() {
@@ -11,11 +12,32 @@ function App() {
   const [completed, setCompleted] = useState(new Set());
   const [timerStep, setTimerStep] = useState(null);
   const [taskName, setTaskName] = useState("");
+  const [records, setRecords] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("tasksplit_records") || "[]");
+    } catch { return []; }
+  });
 
   const [apiKey, setApiKey] = useState(
     () => localStorage.getItem("deepseek_api_key") || ""
   );
   const [showSettings, setShowSettings] = useState(false);
+
+  // Save record when all steps completed
+  useEffect(() => {
+    if (steps.length > 0 && completed.size === steps.length) {
+      const totalMinutes = steps.reduce((sum, s) => sum + s.estimated_minutes, 0);
+      const record = {
+        task: taskName,
+        steps: steps.length,
+        minutes: totalMinutes,
+        date: new Date().toLocaleDateString("zh-CN"),
+      };
+      const newRecords = [record, ...records].slice(0, 20);
+      setRecords(newRecords);
+      localStorage.setItem("tasksplit_records", JSON.stringify(newRecords));
+    }
+  }, [completed.size]);
 
   async function handleSubmit({ task, scene, answers }) {
     setLoading(true);
@@ -61,34 +83,54 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      {/* 设置按钮 */}
-      <div className="fixed top-4 right-4 z-40">
+    <div className="min-h-screen relative overflow-hidden" style={{ backgroundColor: "var(--cream)" }}>
+      {/* Decorative background blobs - Tiimo style */}
+      <div className="fixed top-[-120px] right-[-80px] w-[350px] h-[350px] rounded-full opacity-20 pointer-events-none"
+        style={{ background: "var(--peach)", filter: "blur(80px)" }} />
+      <div className="fixed bottom-[-100px] left-[-60px] w-[300px] h-[300px] rounded-full opacity-20 pointer-events-none"
+        style={{ background: "var(--lavender)", filter: "blur(80px)" }} />
+      <div className="fixed top-[40%] left-[60%] w-[250px] h-[250px] rounded-full opacity-10 pointer-events-none"
+        style={{ background: "var(--mint)", filter: "blur(80px)" }} />
+
+      {/* Settings button */}
+      <div className="fixed top-5 right-5 z-40">
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="w-9 h-9 rounded-full bg-white shadow-sm border border-gray-200 
-            flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+          className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg
+            transition-all hover:scale-110 active:scale-95"
+          style={{
+            backgroundColor: "white",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+          }}
         >
           ⚙️
         </button>
         {showSettings && (
-          <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-lg border border-gray-100 p-4 space-y-3">
-            <p className="text-sm font-medium text-gray-700">DeepSeek API Key</p>
+          <div className="absolute right-0 mt-2 w-80 rounded-3xl p-5 space-y-4 animate-slideDown"
+            style={{ backgroundColor: "white", boxShadow: "0 8px 32px rgba(0,0,0,0.1)" }}>
+            <p className="text-sm font-bold" style={{ color: "var(--soft-dark)" }}>
+              🔑 DeepSeek API Key
+            </p>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk-..."
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm
-                focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              className="w-full px-4 py-3 rounded-2xl border-2 text-sm font-medium
+                focus:outline-none transition-all"
+              style={{ borderColor: "#F0ECE8" }}
+              onFocus={(e) => e.target.style.borderColor = "var(--peach)"}
+              onBlur={(e) => e.target.style.borderColor = "#F0ECE8"}
             />
             <div className="flex justify-between items-center">
-              <p className="text-xs text-gray-400">
-                {apiKey ? "✅ 已配置" : "未配置则使用演示数据"}
+              <p className="text-xs font-medium" style={{ color: "var(--warm-gray)" }}>
+                {apiKey ? "✅ 已配置" : "未配置 = 演示模式"}
               </p>
               <button
                 onClick={handleSaveKey}
-                className="px-3 py-1.5 text-xs rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition-colors"
+                className="px-4 py-2 rounded-xl text-sm font-bold text-white
+                  transition-all hover:scale-105 active:scale-95"
+                style={{ background: "linear-gradient(135deg, var(--coral), var(--peach))" }}
               >
                 保存
               </button>
@@ -97,33 +139,54 @@ function App() {
         )}
       </div>
 
-      {/* 主内容 */}
-      <div className="pt-16 pb-20 px-4">
-        <div className={`transition-all duration-500 ${
-          steps.length === 0 ? "mt-[25vh]" : "mt-4"
+      {/* Main content */}
+      <div className="relative z-10 pt-16 pb-24 px-5">
+        {/* Input area */}
+        <div className={`transition-all duration-700 ease-out ${
+          steps.length === 0 ? "mt-[22vh]" : "mt-4"
         }`}>
           <TaskInput onSubmit={handleSubmit} loading={loading} />
         </div>
 
+        {/* Loading animation */}
         {loading && (
-          <div className="mt-12 text-center space-y-3 animate-pulse">
-            <div className="text-3xl">🧠</div>
-            <p className="text-gray-500">正在拆解「{taskName}」...</p>
-            <p className="text-xs text-gray-400">AI 正在把大任务变成小步骤</p>
+          <div className="mt-16 text-center space-y-4 animate-fadeIn">
+            <div className="text-5xl animate-float">🧠</div>
+            <p className="text-lg font-bold" style={{ color: "var(--soft-dark)" }}>
+              正在拆解「{taskName}」...
+            </p>
+            <p className="text-sm font-medium" style={{ color: "var(--warm-gray)" }}>
+              AI 正在把大任务变成小步骤，稍等一下
+            </p>
+            {/* Tiimo-style loading dots */}
+            <div className="flex justify-center gap-2 mt-4">
+              {[0, 1, 2].map((i) => (
+                <div key={i}
+                  className="w-3 h-3 rounded-full animate-pulse"
+                  style={{
+                    backgroundColor: ["var(--coral)", "var(--sunshine)", "var(--mint)"][i],
+                    animationDelay: `${i * 200}ms`,
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
 
+        {/* Error */}
         {error && (
-          <div className="mt-8 max-w-xl mx-auto p-4 rounded-2xl bg-red-50 border border-red-200">
-            <p className="text-red-600 text-sm">❌ {error}</p>
-            <p className="text-red-400 text-xs mt-1">
+          <div className="mt-8 max-w-lg mx-auto p-5 rounded-3xl animate-popIn"
+            style={{ backgroundColor: "#FFF0F0", border: "2px solid #FFD0D0" }}>
+            <p className="font-bold" style={{ color: "var(--coral)" }}>❌ {error}</p>
+            <p className="text-sm mt-1 font-medium" style={{ color: "var(--warm-gray)" }}>
               请检查 API Key 是否正确，或稍后重试
             </p>
           </div>
         )}
 
+        {/* Step list */}
         {steps.length > 0 && !loading && (
-          <div className="mt-8 animate-fadeIn">
+          <div className="mt-10">
             <StepList
               steps={steps}
               onToggle={handleToggle}
@@ -132,8 +195,14 @@ function App() {
             />
           </div>
         )}
+
+        {/* Completion records */}
+        {steps.length === 0 && !loading && (
+          <CompletionRecord records={records} />
+        )}
       </div>
 
+      {/* Focus timer overlay */}
       {timerStep && (
         <FocusTimer
           step={timerStep}

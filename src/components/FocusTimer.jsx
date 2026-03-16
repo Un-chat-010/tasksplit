@@ -20,31 +20,39 @@ export default function FocusTimer({ step, onComplete, onClose }) {
   const seconds = secondsLeft % 60;
   const timeUp = secondsLeft <= 0;
 
-  // SVG circle params
-  const radius = 90;
+  const radius = 100;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - progress);
 
   return (
-    <div className="fixed inset-0 bg-gray-900/80 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl p-8 max-w-sm w-full mx-4 text-center space-y-6 shadow-2xl">
-        {/* 当前步骤 */}
-        <p className="text-gray-600 text-sm leading-relaxed px-4">
-          {step.description}
-        </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fadeIn"
+      style={{ backgroundColor: "rgba(45, 42, 50, 0.85)", backdropFilter: "blur(12px)" }}>
+      <div className="rounded-[2rem] p-10 max-w-md w-full mx-4 text-center space-y-8 animate-popIn"
+        style={{ backgroundColor: "var(--cream)", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
 
-        {/* 倒计时圆环 */}
-        <div className="relative w-52 h-52 mx-auto">
-          <svg className="w-full h-full -rotate-90" viewBox="0 0 200 200">
-            <circle
-              cx="100" cy="100" r={radius}
-              fill="none" stroke="#E5E7EB" strokeWidth="8"
-            />
-            <circle
-              cx="100" cy="100" r={radius}
+        {/* Step description */}
+        <div className="px-4">
+          <p className="text-xs font-bold uppercase tracking-wider mb-2"
+            style={{ color: "var(--peach)" }}>
+            专注中
+          </p>
+          <p className="text-lg font-bold leading-relaxed"
+            style={{ color: "var(--soft-dark)" }}>
+            {step.description}
+          </p>
+        </div>
+
+        {/* Timer ring */}
+        <div className="relative w-56 h-56 mx-auto">
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 220 220">
+            {/* Background ring */}
+            <circle cx="110" cy="110" r={radius}
+              fill="none" stroke="#F0ECE8" strokeWidth="10" />
+            {/* Progress ring - gradient effect */}
+            <circle cx="110" cy="110" r={radius}
               fill="none"
-              stroke={timeUp ? "#22C55E" : "#6366F1"}
-              strokeWidth="8"
+              stroke={timeUp ? "var(--mint)" : "var(--coral)"}
+              strokeWidth="10"
               strokeLinecap="round"
               strokeDasharray={circumference}
               strokeDashoffset={offset}
@@ -52,48 +60,60 @@ export default function FocusTimer({ step, onComplete, onClose }) {
             />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl font-mono font-bold text-gray-800">
-              {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+            <span className="text-5xl font-extrabold tabular-nums"
+              style={{ color: "var(--soft-dark)" }}>
+              {String(minutes).padStart(2, "0")}
+              <span className="animate-pulse">:</span>
+              {String(seconds).padStart(2, "0")}
             </span>
             {!timeUp && (
               <button
                 onClick={() => setRunning(!running)}
-                className="text-xs text-gray-400 hover:text-indigo-500 mt-1 transition-colors"
+                className="mt-2 text-sm font-bold transition-all hover:scale-110"
+                style={{ color: "var(--warm-gray)" }}
               >
-                {running ? "暂停" : "继续"}
+                {running ? "⏸ 暂停" : "▶ 继续"}
               </button>
             )}
           </div>
         </div>
 
-        {/* 按钮区 */}
+        {/* Action buttons */}
         {timeUp ? (
-          <div className="space-y-3">
-            <p className="text-green-600 font-medium">⏰ 时间到！完成了吗？</p>
+          <div className="space-y-4">
+            <p className="text-lg font-bold" style={{ color: "var(--mint)" }}>
+              ⏰ 时间到！完成了吗？
+            </p>
             <div className="flex gap-3 justify-center">
               <button
                 onClick={onComplete}
-                className="px-6 py-2.5 rounded-xl bg-green-500 text-white font-medium
-                  hover:bg-green-600 active:scale-95 transition-all"
+                className="px-8 py-3 rounded-2xl text-white font-bold text-base
+                  transition-all hover:scale-105 active:scale-95 animate-pulse-glow"
+                style={{
+                  background: "linear-gradient(135deg, var(--mint), #4CAF50)",
+                  boxShadow: "0 4px 16px rgba(107,203,119,0.4)",
+                }}
               >
-                ✅ 完成了
+                ✅ 完成了！
               </button>
               <button
-                onClick={() => {
-                  setSecondsLeft(5 * 60);
-                  setRunning(true);
+                onClick={() => { setSecondsLeft(5 * 60); setRunning(true); }}
+                className="px-6 py-3 rounded-2xl font-bold text-base
+                  transition-all hover:scale-105 active:scale-95"
+                style={{
+                  backgroundColor: "#F0ECE8",
+                  color: "var(--warm-gray)",
                 }}
-                className="px-6 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-medium
-                  hover:bg-gray-200 active:scale-95 transition-all"
               >
-                还需要 5 分钟
+                再 5 分钟
               </button>
             </div>
           </div>
         ) : (
           <button
             onClick={onClose}
-            className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-sm font-semibold transition-all hover:scale-105"
+            style={{ color: "var(--warm-gray)", opacity: 0.6 }}
           >
             取消计时
           </button>

@@ -1,7 +1,18 @@
 import { useState } from "react";
 
-export default function StepCard({ step, onToggle, onStartTimer }) {
+const COLORS = [
+  { bg: "#FFF0F0", check: "#FF6B6B", badge: "#FFE0E0", badgeText: "#FF6B6B" },
+  { bg: "#FFF8E0", check: "#FFD93D", badge: "#FFF3C4", badgeText: "#D4A000" },
+  { bg: "#E8F8EB", check: "#6BCB77", badge: "#D4F5D4", badgeText: "#4CAF50" },
+  { bg: "#EBF3FF", check: "#4D96FF", badge: "#D6E8FF", badgeText: "#2979FF" },
+  { bg: "#F3ECFF", check: "#B088F9", badge: "#E8DCFF", badgeText: "#7C4DFF" },
+  { bg: "#FFF0F8", check: "#FF8ED4", badge: "#FFE0F0", badgeText: "#E91E90" },
+  { bg: "#FFF3EB", check: "#FFA07A", badge: "#FFE4D4", badgeText: "#FF7043" },
+];
+
+export default function StepCard({ step, onToggle, onStartTimer, index }) {
   const [checked, setChecked] = useState(false);
+  const color = COLORS[index % COLORS.length];
 
   function handleToggle() {
     setChecked(!checked);
@@ -10,58 +21,57 @@ export default function StepCard({ step, onToggle, onStartTimer }) {
 
   return (
     <div
-      className={`flex items-start gap-4 p-4 rounded-2xl border transition-all
-        ${
-          checked
-            ? "bg-green-50 border-green-200"
-            : "bg-white border-gray-100 shadow-sm hover:shadow-md"
-        }`}
+      className={`flex items-start gap-4 p-5 rounded-3xl transition-all duration-300 step-color-${index % 7}
+        ${checked ? "opacity-60 scale-[0.98]" : "hover:scale-[1.01] hover:shadow-lg"}`}
+      style={{
+        backgroundColor: checked ? "#F5F5F0" : color.bg,
+        boxShadow: checked ? "none" : "0 2px 12px rgba(0,0,0,0.04)",
+        animationDelay: `${index * 80}ms`,
+      }}
     >
-      {/* 勾选框 */}
+      {/* Checkbox */}
       <button
         onClick={handleToggle}
-        className={`mt-0.5 w-6 h-6 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all
-          ${
-            checked
-              ? "bg-green-500 border-green-500 text-white"
-              : "border-gray-300 hover:border-indigo-400"
-          }`}
+        className="mt-1 w-7 h-7 rounded-xl flex-shrink-0 flex items-center justify-center
+          transition-all duration-200 border-2"
+        style={{
+          backgroundColor: checked ? color.check : "white",
+          borderColor: checked ? color.check : "#E0DCD8",
+        }}
       >
         {checked && (
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24"
+            stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         )}
       </button>
 
-      {/* 内容 */}
+      {/* Content */}
       <div className="flex-1 min-w-0">
-        <p
-          className={`text-base leading-relaxed ${
-            checked ? "text-gray-400 line-through" : "text-gray-800"
-          }`}
-        >
-          <span className="text-indigo-400 font-mono text-sm mr-2">
-            {step.order}.
-          </span>
+        <p className={`text-base font-semibold leading-relaxed transition-all ${
+          checked ? "line-through text-gray-400" : ""
+        }`} style={{ color: checked ? undefined : "var(--soft-dark)" }}>
           {step.description}
         </p>
-        <p className="text-xs text-gray-400 mt-1">
-          ✅ 完成标准：{step.done_criteria}
+        <p className="text-sm mt-1.5 font-medium" style={{ color: "var(--warm-gray)", opacity: 0.7 }}>
+          ✅ {step.done_criteria}
         </p>
       </div>
 
-      {/* 右侧：时间 + 计时按钮 */}
+      {/* Time badge + timer */}
       <div className="flex flex-col items-end gap-2 flex-shrink-0">
-        <span className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-600 font-medium">
-          {step.estimated_minutes} 分钟
+        <span className="text-xs px-3 py-1.5 rounded-xl font-bold"
+          style={{ backgroundColor: color.badge, color: color.badgeText }}>
+          {step.estimated_minutes}分钟
         </span>
         {!checked && (
           <button
             onClick={() => onStartTimer(step)}
-            className="text-xs text-indigo-500 hover:text-indigo-700 font-medium transition-colors"
+            className="text-xs font-bold transition-all hover:scale-110 active:scale-95"
+            style={{ color: color.check }}
           >
-            ▶ 开始计时
+            ▶ 计时
           </button>
         )}
       </div>
