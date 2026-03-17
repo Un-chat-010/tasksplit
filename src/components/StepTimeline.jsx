@@ -16,46 +16,140 @@ function formatMins(m) {
   return m % 60 > 0 ? `${h}h${m % 60}'` : `${h}h`;
 }
 
-export default function StepTimeline({ steps, completed, onToggle, onStartTimer, onReorder }) {
-  const [dragIdx, setDragIdx] = useState(null);
-  const [overIdx, setOverIdx] = useState(null);
-
-  const totalMins = steps.reduce((s, st) => s + st.estimated_minutes, 0);
-  const completedCount = completed.size;
-  const progress = steps.length > 0 ? (completedCount / steps.length) * 100 : 0;
-  const allDone = completedCount === steps.length && steps.length > 0;
-
-  // cumulative time markers
-  let cum = 0;
-  const cumTimes = steps.map(s => { const start = cum; cum += s.estimated_minutes; return { start, end: cum }; });
-
-  function handleDragStart(e, i) { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; e.target.style.opacity = "0.4"; }
-  function handleDragEnd(e) {
-    e.target.style.opacity = "1";
-    if (dragIdx !== null && overIdx !== null && dragIdx !== overIdx) onReorder(dragIdx, overIdx);
-    setDragIdx(null); setOverIdx(null);
+function countAllSteps(steps) {
+  let count = 0;
+  for (const s of steps) {
+    count += 1;
+    if (s.children?.length) count += countAllSteps(s.children);
   }
-  function handleDragOver(e, i) { e.preventDefault(); setOverIdx(i); }
+  return count;
+}
+
+function countCompleted(steps, completed) {
+  let count = 0;
+  for (const s of steps) {
+    if (completed.has(s.id)) count++;
+    if (s.children?.length) count += countCompleted(s.children, completed);
+  }
+  return count;
+}
+
+function totalMinutes(steps) {
+  let sum = 0;
+  for (const s of steps) {
+    sum += s.estimated_minutes || 0;
+    if (s.children?.length) sum += totalMinutes(s.children);
+  }
+  return sum;
+}
+
+// Single step row (recursive)
+function StepRow({ step, index, depth, completed, onToggle, onStartTimer, onSplitMore, splitting }) {
+  const c = COLORS[(index + depth) % COLORS.length];
+  const done = completed.has(step.id);
+  const hasChildren = step.children?.length > 0;
+  const [expanded, setExpanded] = useState(true);
+  const isSplitting = splitting === step.id;
+
+  // If all children done, parent auto-done
+  const childrenAllDone = hasChildren && step.children.every(ch =>
+    completed.has(ch.id) && (!ch.children?.length || ch.children.every(gc => completed.has(gc.id)))
+  );
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-bold" style={{ color: "var(--warm-gray)" }}>
-            {completedCount}/{steps.length} 完成
-          </span>
-          <span className="text-xs px-2.5 py-1 rounded-lg font-bold"
-            style={{ backgroundColor: "#FFF3EB", color: "var(--peach)" }}>
-            共 {formatMins(totalMins)}
-          </span>
+    <>
+      <div className={`relative flex items-start gap-3 p-3 rounded-2xl transition-all duration-300
+        ${done || childrenAllDone ? "opacity-55" : "hover:shadow-md"}`}
+        style={{
+          backgroundColor: done || childrenAllDone ? "#F5F5F0" : c.bg,
+          boxShadow: done ? "none" : "0 1px 8px rgba(0,0,0,0.03)",
+          marginLeft: `${depth * 20}px`,
+          borderLeft: `3px solid ${c.dot}`,
+        }}>
+
+        {/* Checkbox */}
+        <button onClick={() => onToggle(step.id, !(done || childrenAllDone))}
+          className="mt-0.5 w-5 h-5 rounded-lg flex-shrink-0 flex items-center justify-center border-2 transition-all"
+          style={{ backgroundColor: (done || childrenAllDone) ? c.check : "white",
+            borderColor: (done || childrenAllDone) ? c.check : "#E0DCD8" }}>
+          {(done || childrenAllDone) && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+        </button>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-bold leading-relaxed ${(done || childrenAllDone) ? "line-through text-gray-400" : ""}`}
+            style={{ color: (done || childrenAllDone) ? undefined : "var(--soft-dark)" }}>
+            {step.description}
+          </p>
+          {step.done_criteria && (
+            <p className="text-[11px] mt-1 font-medium" style={{ color: "var(--warm-gray)", opacity: 0.6 }}>
+              ✅ {step.done_criteria}
+            </p>
+          )}
+          {/* Actions row */}
+          {!(done || childrenAllDone) && (
+            <div className="flex items-center gap-3 mt-2">
+              <button onClick={() => onStartTimer(step)}
+                className="text-[11px] font-bold hover:scale-110 transition-all" style={{ color: c.dot }}>
+                ▶ 计时
+              </button>
+              <button onClick={() => onSplitMore(step)}
+                disabled={isSplitting}
+                className="text-[11px] font-bold hover:scale-110 transition-all disabled:opacity-40"
+                style={{ color: "var(--lavender)" }}>
+                {isSplitting ? "拆解中..." : "🔀 继续拆"}
+              </button>
+              {hasChildren && (
+                <button onClick={() => setExpanded(!expanded)}
+                  className="text-[11px] font-bold" style={{ color: "var(--warm-gray)" }}>
+                  {expanded ? "▼ 收起" : `▶ ${step.children.length} 个子步骤`}
+                </button>
+              )}
+            </div>
+          )}
         </div>
-        <span className="text-[10px] font-medium" style={{ color: "var(--warm-gray)" }}>
-          可拖拽调整顺序
+
+        {/* Badge */}
+        <span className="text-[10px] px-2 py-1 rounded-lg font-bold flex-shrink-0"
+          style={{ backgroundColor: c.badge, color: c.badgeText }}>
+          {step.estimated_minutes}'
         </span>
       </div>
 
-      {/* Progress bar */}
+      {/* Children */}
+      {hasChildren && expanded && (
+        <div className="animate-fadeIn">
+          {step.children.map((child, ci) => (
+            <StepRow key={child.id} step={child} index={ci} depth={depth + 1}
+              completed={completed} onToggle={onToggle} onStartTimer={onStartTimer}
+              onSplitMore={onSplitMore} splitting={splitting} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function StepTimeline({ steps, completed, onToggle, onStartTimer, onReorder, onSplitMore, splitting }) {
+  const total = totalMinutes(steps);
+  const allCount = countAllSteps(steps);
+  const doneCount = countCompleted(steps, completed);
+  const progress = allCount > 0 ? (doneCount / allCount) * 100 : 0;
+  const allDone = allCount > 0 && doneCount === allCount;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-bold" style={{ color: "var(--warm-gray)" }}>
+          {doneCount}/{allCount} 完成
+        </span>
+        <span className="text-xs px-2.5 py-1 rounded-lg font-bold"
+          style={{ backgroundColor: "#FFF3EB", color: "var(--peach)" }}>
+          共 {formatMins(total)}
+        </span>
+      </div>
+
       <div className="w-full h-2.5 rounded-full" style={{ backgroundColor: "var(--border)" }}>
         <div className="h-full rounded-full transition-all duration-700"
           style={{ width: `${progress}%`,
@@ -63,118 +157,23 @@ export default function StepTimeline({ steps, completed, onToggle, onStartTimer,
             backgroundSize: "200% 100%" }} />
       </div>
 
-      {/* Unified timeline + list */}
-      <div className="relative pl-14 lg:pl-16">
-        {/* Vertical timeline line */}
-        <div className="absolute left-[22px] lg:left-[26px] top-3 bottom-3 w-[3px] rounded-full"
-          style={{ background: "linear-gradient(180deg, var(--coral), var(--sunshine), var(--mint), var(--sky), var(--lavender))" }} />
-
-        {steps.map((step, i) => {
-          const c = COLORS[i % COLORS.length];
-          const done = completed.has(step.order);
-          const isDragging = dragIdx === i;
-          const isDragOver = overIdx === i && dragIdx !== i;
-
-          return (
-            <div key={step.order}
-              draggable onDragStart={(e) => handleDragStart(e, i)}
-              onDragEnd={handleDragEnd} onDragOver={(e) => handleDragOver(e, i)}
-              className={`relative mb-3 transition-all duration-200 cursor-grab active:cursor-grabbing
-                ${isDragging ? "opacity-40 scale-95" : ""} animate-fadeInUp`}
-              style={{ animationDelay: `${i * 60}ms`, opacity: 0 }}>
-
-              {/* Timeline dot + time label */}
-              <div className="absolute -left-14 lg:-left-16 top-4 flex flex-col items-center" style={{ width: "44px" }}>
-                <div className={`w-5 h-5 rounded-full border-[3px] transition-all flex items-center justify-center
-                  ${done ? "scale-110" : ""}`}
-                  style={{ borderColor: c.dot, backgroundColor: done ? c.dot : "var(--cream)" }}>
-                  {done && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                </div>
-                <span className="text-[9px] font-bold mt-1 whitespace-nowrap" style={{ color: c.dot, opacity: 0.7 }}>
-                  {formatMins(cumTimes[i].start)}
-                </span>
-              </div>
-
-              {/* Drop indicator */}
-              {isDragOver && <div className="absolute -top-1.5 left-0 right-0 h-[3px] rounded-full" style={{ backgroundColor: c.dot }} />}
-
-              {/* Card */}
-              <div className={`rounded-2xl p-4 transition-all duration-300 step-color-${i % 7}
-                ${done ? "opacity-55" : "hover:shadow-lg"}`}
-                style={{ backgroundColor: done ? "#F5F5F0" : c.bg,
-                  boxShadow: done ? "none" : "0 2px 12px rgba(0,0,0,0.04)" }}>
-
-                <div className="flex items-start gap-3">
-                  {/* Checkbox */}
-                  <button onClick={() => onToggle(step.order, !done)}
-                    className="mt-0.5 w-6 h-6 rounded-lg flex-shrink-0 flex items-center justify-center border-2 transition-all"
-                    style={{ backgroundColor: done ? c.check : "white", borderColor: done ? c.check : "#E0DCD8" }}>
-                    {done && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                  </button>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-bold leading-relaxed ${done ? "line-through text-gray-400" : ""}`}
-                      style={{ color: done ? undefined : "var(--soft-dark)" }}>
-                      {step.description}
-                    </p>
-                    <p className="text-xs mt-1 font-medium" style={{ color: "var(--warm-gray)", opacity: 0.6 }}>
-                      ✅ {step.done_criteria}
-                    </p>
-                  </div>
-
-                  {/* Badge + timer */}
-                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                    <span className="text-[11px] px-2.5 py-1 rounded-lg font-bold"
-                      style={{ backgroundColor: c.badge, color: c.badgeText }}>
-                      {step.estimated_minutes}分钟
-                    </span>
-                    {!done && (
-                      <button onClick={() => onStartTimer(step)}
-                        className="text-[11px] font-bold hover:scale-110 transition-all"
-                        style={{ color: c.dot }}>
-                        ▶ 计时
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* End marker */}
-        <div className="relative">
-          <div className="absolute -left-14 lg:-left-16 top-0" style={{ width: "44px" }}>
-            <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] mx-auto"
-              style={{ backgroundColor: "var(--border)" }}>🏁</div>
-            <span className="text-[9px] font-bold mt-1 block text-center" style={{ color: "var(--warm-gray)", opacity: 0.5 }}>
-              {formatMins(totalMins)}
-            </span>
+      <div className="space-y-2">
+        {steps.map((step, i) => (
+          <div key={step.id} className="animate-fadeInUp" style={{ animationDelay: `${i * 60}ms`, opacity: 0 }}>
+            <StepRow step={step} index={i} depth={0}
+              completed={completed} onToggle={onToggle} onStartTimer={onStartTimer}
+              onSplitMore={onSplitMore} splitting={splitting} />
           </div>
-          <div className="py-2 pl-1">
-            <p className="text-[11px] font-bold" style={{ color: "var(--warm-gray)", opacity: 0.4 }}>
-              预计总时长 {formatMins(totalMins)}
-            </p>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Celebration */}
       {allDone && (
         <div className="text-center py-8 space-y-3 animate-popIn">
           <div className="text-5xl animate-float">🎉</div>
           <p className="text-xl font-extrabold" style={{ color: "var(--mint)" }}>全部完成！</p>
           <p className="text-sm font-medium" style={{ color: "var(--warm-gray)" }}>
-            {steps.length} 个步骤 · 约 {formatMins(totalMins)}
+            {allCount} 个步骤 · 约 {formatMins(total)}
           </p>
-          <div className="flex justify-center gap-2 text-xl">
-            {["🌟","💪","🔥","✨","🏆"].map((e, i) => (
-              <span key={i} className="animate-float" style={{ animationDelay: `${i*200}ms` }}>{e}</span>
-            ))}
-          </div>
         </div>
       )}
     </div>

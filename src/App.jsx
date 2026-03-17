@@ -6,7 +6,24 @@ import CompletionRecord from "./components/CompletionRecord.jsx";
 import MoodTracker from "./components/MoodTracker.jsx";
 import Journal from "./components/Journal.jsx";
 import ADHDTools from "./components/ADHDTools.jsx";
+import CalendarView from "./components/CalendarView.jsx";
 import { splitTask, splitTaskMock } from "./services/ai.js";
+import { buildPrompt } from "./prompts/base.js";
+
+let stepIdCounter = 1;
+function assignIds(steps) {
+  return steps.map(s => ({ ...s, id: stepIdCounter++, children: s.children ? assignIds(s.children) : [] }));
+}
+
+function countAll(steps) {
+  let c = 0; for (const s of steps) { c++; if (s.children?.length) c += countAll(s.children); } return c;
+}
+function countDone(steps, done) {
+  let c = 0; for (const s of steps) { if (done.has(s.id)) c++; if (s.children?.length) c += countDone(s.children, done); } return c;
+}
+function sumMins(steps) {
+  let s = 0; for (const st of steps) { s += st.estimated_minutes || 0; if (st.children?.length) s += sumMins(st.children); } return s;
+}
 
 function App() {
   const [steps, setSteps] = useState([]);
@@ -16,61 +33,86 @@ function App() {
   const [timerStep, setTimerStep] = useState(null);
   const [taskName, setTaskName] = useState("");
   const [mobileTab, setMobileTab] = useState("home");
+  const [splitting, setSplitting] = useState(null);
   const [records, setRecords] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("tasksplit_records") || "[]"); }
-    catch { return []; }
+    try { return JSON.parse(localStorage.getItem("tasksplit_records") || "[]"); } catch { return []; }
   });
   const [apiKey, setApiKey] = useState(() => localStorage.getItem("deepseek_api_key") || "");
   const [showSettings, setShowSettings] = useState(false);
-
-  // FIX: prevent duplicate record saves
   const savedRef = useRef(false);
 
   useEffect(() => {
-    if (steps.length > 0 && completed.size === steps.length && !savedRef.current) {
+    const all = countAll(steps), done = countDone(steps, completed);
+    if (all > 0 && done === all && !savedRef.current) {
       savedRef.current = true;
-      const totalMinutes = steps.reduce((sum, s) => sum + s.estimated_minutes, 0);
-      const rec = { task: taskName, steps: steps.length, minutes: totalMinutes,
-        date: new Date().toLocaleDateString("zh-CN") };
+      const rec = { task: taskName, steps: all, minutes: sumMins(steps), date: new Date().toLocaleDateString("zh-CN") };
       const nr = [rec, ...records].slice(0, 20);
       setRecords(nr);
       localStorage.setItem("tasksplit_records", JSON.stringify(nr));
-      // Add reward points
-      const pts = parseInt(localStorage.getItem("tasksplit_points") || "0") + steps.length;
-      localStorage.setItem("tasksplit_points", String(pts));
     }
-    // Reset saved flag if not all complete
-    if (steps.length > 0 && completed.size < steps.length) {
-      savedRef.current = false;
-    }
-  }, [completed.size, steps.length]);
+  }, [completed, steps]);
 
-  async function handleSubmit({ task, scene, answers }) {
+  async function handleSubmit({ task, deadline, status, goal }) {
     setLoading(true); setError(null); setSteps([]); setCompleted(new Set());
-    setTaskName(task); setMobileTab("home"); savedRef.current = false;
+    setTaskName(task); setMobileTab("home"); savedRef.current = false; stepIdCounter = 1;
     try {
+      const attrs = { deadline, status, goal };
       const result = apiKey.trim()
-        ? await splitTask(task, scene, answers, apiKey.trim())
+        ? await splitTask(task, attrs, apiKey.trim())
         : await splitTaskMock(task);
-      setSteps(result);
+      setSteps(assignIds(result));
     } catch (err) { setError(err.message || "拆解失败"); }
     finally { setLoading(false); }
   }
 
-  function handleToggle(order, isChecked) {
-    setCompleted(prev => { const n = new Set(prev); isChecked ? n.add(order) : n.delete(order); return n; });
-    // Add 1 point per step completed
+  function handleToggle(id, isChecked) {
+    setCompleted(prev => { const n = new Set(prev); isChecked ? n.add(id) : n.delete(id); return n; });
     if (isChecked) {
       const pts = parseInt(localStorage.getItem("tasksplit_points") || "0") + 1;
       localStorage.setItem("tasksplit_points", String(pts));
     }
   }
   function handleReorder(from, to) {
-    const s = [...steps]; const [m] = s.splice(from, 1); s.splice(to, 0, m);
-    s.forEach((st, i) => st.order = i + 1); setSteps(s);
+    const s = [...steps]; const [m] = s.splice(from, 1); s.splice(to, 0, m); setSteps(s);
+  }
+  async function handleSplitMore(step) {
+    setSplitting(step.id);
+    try {
+      const subPrompt = `用户觉得以下步骤还是太大了，请拆成更小的 3-5 个子步骤。\n\n父步骤：${step.description}\n完成标准：${step.done_criteria || "无"}`;
+      let subSteps;
+      if (apiKey.trim()) {
+        const res = await fetch("https://api.deepseek.com/chat/completions", {
+          method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "deepseek-chat",
+            messages: [{ role: "system", content: buildPrompt(null) }, { role: "user", content: subPrompt }],
+            temperature: 0.7, response_format: { type: "json_object" },
+          }),
+        });
+        const data = await res.json();
+        subSteps = JSON.parse(data.choices[0].message.content).steps;
+      } else {
+        await new Promise(r => setTimeout(r, 1000));
+        subSteps = [
+          { order: 1, description: `${step.description} — 准备`, estimated_minutes: Math.max(2, Math.floor(step.estimated_minutes / 3)), done_criteria: "准备完成" },
+          { order: 2, description: `${step.description} — 执行`, estimated_minutes: Math.max(3, Math.floor(step.estimated_minutes / 2)), done_criteria: "完成" },
+          { order: 3, description: `${step.description} — 检查`, estimated_minutes: 2, done_criteria: "检查无误" },
+        ];
+      }
+      const children = assignIds(subSteps);
+      function addCh(list) {
+        return list.map(s => {
+          if (s.id === step.id) return { ...s, children: [...(s.children || []), ...children] };
+          if (s.children?.length) return { ...s, children: addCh(s.children) };
+          return s;
+        });
+      }
+      setSteps(prev => addCh(prev));
+    } catch (err) { console.error("递归拆解失败:", err); }
+    finally { setSplitting(null); }
   }
   function handleTimerComplete() {
-    if (timerStep) setCompleted(prev => new Set(prev).add(timerStep.order));
+    if (timerStep) setCompleted(prev => new Set(prev).add(timerStep.id));
     setTimerStep(null);
   }
 
@@ -82,27 +124,21 @@ function App() {
       <div className="text-5xl animate-float">🧠</div>
       <p className="text-lg font-bold" style={{ color: "var(--soft-dark)" }}>正在拆解「{taskName}」...</p>
       <div className="flex gap-2">
-        {[0,1,2].map(i => (
-          <div key={i} className="w-3 h-3 rounded-full animate-pulse"
-            style={{ backgroundColor: ["var(--coral)","var(--sunshine)","var(--mint)"][i], animationDelay: `${i*200}ms` }} />
-        ))}
+        {[0,1,2].map(i => (<div key={i} className="w-3 h-3 rounded-full animate-pulse"
+          style={{ backgroundColor: ["var(--coral)","var(--sunshine)","var(--mint)"][i], animationDelay: `${i*200}ms` }} />))}
       </div>
     </div>
   );
-
   const errorView = error && (
     <div className="p-5 rounded-3xl animate-popIn" style={{ backgroundColor: "#FFF0F0", border: "2px solid #FFD0D0" }}>
       <p className="font-bold" style={{ color: "var(--coral)" }}>❌ {error}</p>
-      <p className="text-sm mt-1" style={{ color: "var(--warm-gray)" }}>请检查 API Key 或稍后重试</p>
     </div>
   );
-
   const settingsPanel = showSettings && (
     <div className="card p-4 space-y-3 animate-slideDown">
       <p className="text-xs font-bold">🔑 DeepSeek API Key</p>
-      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-        placeholder="sk-..." className="w-full px-3 py-2 rounded-xl text-xs font-medium focus:outline-none border"
-        style={{ borderColor: "var(--border)" }} />
+      <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."
+        className="w-full px-3 py-2 rounded-xl text-xs font-medium focus:outline-none border" style={{ borderColor: "var(--border)" }} />
       <div className="flex justify-between items-center">
         <span className="text-[10px]" style={{ color: "var(--warm-gray)" }}>{apiKey ? "✅ 已配置" : "未配置=演示"}</span>
         <button onClick={() => { localStorage.setItem("deepseek_api_key", apiKey); setShowSettings(false); }}
@@ -119,7 +155,7 @@ function App() {
       <div className="fixed bottom-[-100px] left-[-60px] w-[300px] h-[300px] rounded-full opacity-12 pointer-events-none"
         style={{ background: "var(--lavender)", filter: "blur(80px)" }} />
 
-      {/* ===== DESKTOP ===== */}
+      {/* DESKTOP */}
       <div className="hidden lg:flex h-screen relative z-10">
         <div className="w-[360px] flex-shrink-0 border-r flex flex-col h-full overflow-y-auto p-5 space-y-4"
           style={{ borderColor: "var(--border)" }}>
@@ -132,14 +168,11 @@ function App() {
               style={{ backgroundColor: "white", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>⚙️</button>
           </div>
           <p className="text-xs font-medium -mt-2" style={{ color: "var(--warm-gray)" }}>{today}</p>
-
           {settingsPanel}
-
           <div className="card p-4">
             <p className="text-xs font-bold mb-3" style={{ color: "var(--warm-gray)" }}>📝 新任务</p>
             <TaskInput onSubmit={handleSubmit} loading={loading} />
           </div>
-
           <MoodTracker compact />
           <Journal compact />
           <ADHDTools compact />
@@ -153,24 +186,23 @@ function App() {
             {hasSteps && (
               <div className="space-y-4">
                 <h2 className="text-lg font-extrabold" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
-                <StepTimeline steps={steps} completed={completed}
-                  onToggle={handleToggle} onStartTimer={setTimerStep} onReorder={handleReorder} />
+                <StepTimeline steps={steps} completed={completed} onToggle={handleToggle}
+                  onStartTimer={setTimerStep} onReorder={handleReorder}
+                  onSplitMore={handleSplitMore} splitting={splitting} />
               </div>
             )}
             {!hasSteps && !loading && !error && (
               <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-5 opacity-50">
                 <div className="text-7xl animate-float">✂️</div>
                 <p className="text-xl font-extrabold" style={{ color: "var(--soft-dark)" }}>在左侧输入任务</p>
-                <p className="text-sm" style={{ color: "var(--warm-gray)" }}>
-                  试试 "写毕业论文"、"整理房间"、"准备面试"
-                </p>
+                <p className="text-sm" style={{ color: "var(--warm-gray)" }}>设置截止日期和目标，AI 会更精准地拆解</p>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* ===== MOBILE ===== */}
+      {/* MOBILE */}
       <div className="lg:hidden flex flex-col min-h-screen relative z-10">
         <div className="flex items-center justify-between px-4 pt-4 pb-1">
           <div className="flex items-center gap-2">
@@ -184,7 +216,6 @@ function App() {
             className="w-8 h-8 rounded-xl flex items-center justify-center text-sm"
             style={{ backgroundColor: "white", boxShadow: "0 1px 6px rgba(0,0,0,0.05)" }}>⚙️</button>
         </div>
-
         {showSettings && <div className="mx-4 mt-2">{settingsPanel}</div>}
 
         <div className="flex-1 overflow-y-auto px-4 pb-24 pt-2">
@@ -196,32 +227,33 @@ function App() {
               {hasSteps && (
                 <div className="space-y-3">
                   <h2 className="text-base font-extrabold px-1" style={{ color: "var(--soft-dark)" }}>{taskName}</h2>
-                  <StepTimeline steps={steps} completed={completed}
-                    onToggle={handleToggle} onStartTimer={setTimerStep} onReorder={handleReorder} />
+                  <StepTimeline steps={steps} completed={completed} onToggle={handleToggle}
+                    onStartTimer={setTimerStep} onReorder={handleReorder}
+                    onSplitMore={handleSplitMore} splitting={splitting} />
                 </div>
               )}
               {!hasSteps && !loading && !error && (
                 <div className="text-center py-8 space-y-3 opacity-40">
                   <div className="text-4xl animate-float">✂️</div>
-                  <p className="text-sm font-bold">选择场景或输入任务，AI 帮你拆</p>
+                  <p className="text-sm font-bold">设置属性 → 输入任务 → AI 拆解</p>
                 </div>
               )}
             </div>
           )}
-          {mobileTab === "mood" && <MoodTracker />}
+          {mobileTab === "calendar" && <CalendarView />}
           {mobileTab === "journal" && <Journal />}
+          {mobileTab === "mood" && <MoodTracker />}
           {mobileTab === "tools" && <ADHDTools />}
-          {mobileTab === "history" && <CompletionRecord records={records} />}
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 flex border-t pb-safe z-30"
           style={{ backgroundColor: "var(--cream)", borderColor: "var(--border)", boxShadow: "0 -2px 12px rgba(0,0,0,0.04)" }}>
           {[
             { id: "home", icon: "✂️", label: "拆解" },
-            { id: "mood", icon: "🧠", label: "状态" },
+            { id: "calendar", icon: "📅", label: "日历" },
             { id: "journal", icon: "📝", label: "日记" },
+            { id: "mood", icon: "🧠", label: "状态" },
             { id: "tools", icon: "⚡", label: "工具" },
-            { id: "history", icon: "📊", label: "记录" },
           ].map(tab => (
             <button key={tab.id} onClick={() => setMobileTab(tab.id)}
               className={`flex-1 flex flex-col items-center py-2.5 gap-0.5 transition-all
@@ -234,7 +266,8 @@ function App() {
         </div>
       </div>
 
-      {timerStep && <FocusTimer step={timerStep} onComplete={handleTimerComplete} onClose={() => setTimerStep(null)} />}
+      {timerStep && <FocusTimer step={timerStep} onComplete={handleTimerComplete}
+        onClose={() => setTimerStep(null)} onSplitMore={handleSplitMore} />}
     </div>
   );
 }
